@@ -1,0 +1,20 @@
+[Unit]
+Description=BlastBox agent control plane
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+User=blastbox
+Group=blastbox
+WorkingDirectory=/opt/blastbox
+EnvironmentFile=/etc/blastbox.env
+ExecStart=/usr/bin/python3 -m blastbox.server
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=false
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+#cloud-config
+# Paste as Vultr "Cloud-Init User-Data" when creating the VM. Not yet used on a real VM.
+# Replace REPO_URL once the repo is public. Set the API key afterwards in /etc/blastbox.env.
+package_update: true
+packages: [git]
+runcmd:
+  - git clone REPO_URL /root/blastbox-src
+  - bash /root/blastbox-src/deploy/setup.sh

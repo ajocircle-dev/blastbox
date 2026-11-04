@@ -1,4 +1,4 @@
-import json, os, threading, unittest, urllib.request
+import json, os, threading, unittest, urllib.error, urllib.request
 from unittest import mock
 from blastbox.agent import run_task
 from blastbox.llm import MockLLM, OpenAICompatibleLLM, extract_code
@@ -51,6 +51,7 @@ class Core(unittest.TestCase):
         for flag in ["--network=none", "--read-only", "--cap-drop=ALL", "--rm", "--runtime=runsc",
                      "--security-opt=no-new-privileges", "--user=65534:65534"]:
             self.assertIn(flag, a)
+        self.assertIn("--init", a)
         self.assertFalse(any("KEY" in x for x in a))
 
     def test_openai_client_request_shape(self):
@@ -83,3 +84,44 @@ class Core(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Streaming(unittest.TestCase):
+    def test_stream_order(self):
+        from blastbox.agent import stream_task
+        types = [e["type"] for e in stream_task("count to three", MockLLM(), SB)]
+        self.assertEqual(types[:2], ["task", "code"])
+        self.assertEqual(types.count("line"), 3)
+        self.assertEqual(types[-2:], ["result", "destroyed"])
+
+    def test_sse_endpoint_streams_live(self):
+        import time
+        from http.server import ThreadingHTTPServer
+        from blastbox.server import H
+        s = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        with mock.patch.dict(os.environ, {"SANDBOX": "local", "LLM_PROVIDER": "mock"}):
+            r = urllib.request.urlopen("http://127.0.0.1:%d/api/stream?task=count%%20to%%20three" % s.server_port)
+            self.assertEqual(r.headers["Content-Type"], "text/event-stream")
+            stamps, events = {}, []
+            for raw in r:
+                line = raw.decode().strip()
+                if line.startswith("data: "):
+                    d = json.loads(line[6:])
+                    events.append(d)
+                    if d.get("type") == "line":
+                        stamps[d["text"]] = time.time()
+        s.shutdown()
+        self.assertEqual([e["text"] for e in events if e.get("type") == "line"], ["step 1", "step 2", "step 3"])
+        # lines arrive spread out in time, not in one burst at the end
+        self.assertGreater(stamps["step 3"] - stamps["step 1"], 0.4)
+        self.assertEqual(events[-1], {})
+
+    def test_sse_requires_task(self):
+        from http.server import ThreadingHTTPServer
+        from blastbox.server import H
+        s = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen("http://127.0.0.1:%d/api/stream" % s.server_port)
+        s.shutdown()

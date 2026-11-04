@@ -34,6 +34,14 @@ class MockLLM:
             code = "print(open('/etc/passwd').read())"
         elif "secret" in t or "env" in t:
             code = "import os\nprint({k: v for k, v in os.environ.items() if 'KEY' in k or 'TOKEN' in k})"
+        elif "count" in t:
+            code = "import time\nfor i in range(1, 4):\n    print('step', i)\n    time.sleep(0.3)"
+        elif "write" in t and "system" in t:
+            code = "open('/usr/local/pwned.txt', 'w').write('x')\nprint('wrote')"
+        elif "fork" in t:
+            code = "import os\nwhile True:\n    os.fork()"
+        elif "memory" in t:
+            code = "x = bytearray(1024 * 1024 * 1024)\nprint(len(x))"
         elif "forever" in t or "infinite" in t:
             code = "while True:\n    pass"
         elif "fib" in t:

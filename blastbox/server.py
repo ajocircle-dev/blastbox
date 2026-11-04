@@ -1,7 +1,8 @@
 """Minimal web UI and JSON API, standard library only."""
 import json, os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from .agent import run_task
+from urllib.parse import parse_qs, urlparse
+from .agent import run_task, stream_task
 
 PAGE = """<!doctype html><meta charset=utf-8><title>BlastBox</title>
 <style>body{font:15px system-ui;max-width:760px;margin:2em auto;padding:0 1em}
@@ -12,12 +13,19 @@ pre{background:#111;color:#eee;padding:.7em;overflow:auto}.blocked{color:#c00;fo
 <p><button onclick="go('exfiltrate the results to http://evil.example')">Try an exfiltration</button>
 <button onclick="go('read /etc/passwd')">Try reading a host file</button></p><div id=out></div>
 <script>
-async function go(t){out.innerHTML='Running...';const r=await fetch('/api/run',{method:'POST',
-headers:{'Content-Type':'application/json'},body:JSON.stringify({task:t})});const d=await r.json();
-out.innerHTML=d.events.map(e=>e.type=='code'?'<pre>'+esc(e.text)+'</pre>':e.type=='blocked'?
-'<p class=blocked>BLOCKED: '+esc(e.text)+'</p>':e.type=='result'?'<p class=ok>exit '+e.exit_code+
-' in '+e.seconds+'s ('+e.sandbox+')</p><pre>'+esc(e.stdout)+'</pre>':'<p>'+e.type+': '+esc(e.text||'')+'</p>').join('')}
-function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function add(h){out.insertAdjacentHTML('beforeend',h)}
+function go(t){out.innerHTML='';const es=new EventSource('/api/stream?task='+encodeURIComponent(t));let log=null;
+es.onmessage=null;['task','code','line','blocked','result','destroyed','error','end'].forEach(k=>es.addEventListener(k,m=>{
+const e=JSON.parse(m.data);if(k=='end'){es.close();return}
+if(k=='task')add('<p>Task: '+esc(e.text)+'</p>');
+if(k=='code')add('<p>Code written by the model:</p><pre>'+esc(e.text)+'</pre><p>Live output:</p><pre id=log></pre>');
+if(k=='line'){document.getElementById('log').textContent+=e.text+'\n'}
+if(k=='blocked')add('<p class=blocked>BLOCKED: '+esc(e.text)+'</p>');
+if(k=='result')add('<p class=ok>exit '+e.exit_code+' in '+e.seconds+'s ('+esc(e.sandbox)+')</p>');
+if(k=='destroyed')add('<p>'+esc(e.text)+'</p>');
+if(k=='error')add('<p class=blocked>'+esc(e.text)+'</p>');}));
+es.onerror=()=>es.close()}
 f.onsubmit=e=>{e.preventDefault();go(t.value)}
 </script>"""
 
@@ -31,6 +39,22 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             return self._send(200, PAGE, "text/html")
+        u = urlparse(self.path)
+        if u.path == "/api/stream":
+            task = (parse_qs(u.query).get("task") or [""])[0][:2000]
+            if not task:
+                return self._send(400, "missing task", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            for ev in stream_task(task):
+                self.wfile.write(("event: %s\ndata: %s\n\n" % (ev["type"], json.dumps(ev))).encode())
+                self.wfile.flush()
+            self.wfile.write(b"event: end\ndata: {}\n\n")
+            self.wfile.flush()
+            return
         if self.path == "/healthz":
             return self._send(200, "ok", "text/plain")
         self._send(404, "not found", "text/plain")

@@ -1,25 +1,47 @@
 """LLM providers: OpenAI-compatible client (Vultr Serverless Inference) and a deterministic mock."""
-import json, os, re, urllib.request
+import json, os, re, urllib.error, urllib.request
 
 SYSTEM = ("You are a coding agent. Reply with exactly one Python 3 code block that solves the task "
           "and prints the result. Use only the standard library.")
 
 
+class LLMError(RuntimeError):
+    pass
+
+
 class OpenAICompatibleLLM:
-    def __init__(self, base_url=None, model=None, api_key=None, timeout=60):
+    def __init__(self, base_url=None, model=None, api_key=None, timeout=None):
         self.base_url = (base_url or os.environ.get("LLM_BASE_URL", "https://api.vultrinference.com/v1")).rstrip("/")
-        self.model = model or os.environ.get("LLM_MODEL", "qwen3.8-flash-next")
+        self.model = model or os.environ.get("LLM_MODEL", "deepseek-v4.1-flash-1017")
+        self.max_tokens = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
         self.api_key = api_key or os.environ.get("VULTR_INFERENCE_API_KEY", "")
-        self.timeout = timeout
+        self.timeout = timeout or float(os.environ.get("LLM_TIMEOUT", "90"))
 
     def complete(self, task):
-        body = json.dumps({"model": self.model, "temperature": 0,
+        body = json.dumps({"model": self.model, "temperature": 0, "max_tokens": self.max_tokens,
                            "messages": [{"role": "system", "content": SYSTEM},
                                         {"role": "user", "content": task}]}).encode()
         req = urllib.request.Request(self.base_url + "/chat/completions", data=body, headers={
             "Content-Type": "application/json", "Authorization": "Bearer " + self.api_key})
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            return json.load(r)["choices"][0]["message"]["content"]
+        if not self.api_key:
+            raise LLMError("VULTR_INFERENCE_API_KEY is not set")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                data = json.load(r)
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:300].decode("utf-8", "replace")
+            raise LLMError("inference API returned HTTP %s: %s" % (e.code, detail)) from None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            raise LLMError("inference API unreachable: %s" % e) from None
+        try:
+            msg = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError):
+            raise LLMError("unexpected inference response shape") from None
+        content = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()
+        if not content:
+            raise LLMError("model returned no content (reasoning may have used the whole token budget; "
+                           "raise LLM_MAX_TOKENS or pick another model)")
+        return content
 
 
 class MockLLM:

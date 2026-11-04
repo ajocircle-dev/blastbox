@@ -1,6 +1,6 @@
 """Core loop: task -> LLM writes code -> sandbox runs it -> events for the containment feed."""
 import queue, threading
-from .llm import extract_code, get_llm
+from .llm import LLMError, extract_code, get_llm
 from .sandbox import get_sandbox
 
 
@@ -10,6 +10,9 @@ def stream_task(task, llm=None, sandbox=None):
     yield {"type": "task", "text": task}
     try:
         code = extract_code(llm.complete(task))
+    except LLMError as e:
+        yield {"type": "error", "text": "LLM call failed: %s" % e}
+        return
     except Exception as e:
         yield {"type": "error", "text": "LLM call failed: %s" % type(e).__name__}
         return

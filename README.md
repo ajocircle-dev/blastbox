@@ -31,14 +31,31 @@ Environment variables:
 | --- | --- | --- |
 | `LLM_PROVIDER` | `mock` | `mock` or `openai` (any OpenAI-compatible API) |
 | `LLM_BASE_URL` | `https://api.vultrinference.com/v1` | Inference endpoint |
-| `LLM_MODEL` | `qwen3.8-flash-next` | Model id |
+| `LLM_MODEL` | `deepseek-v4.1-flash-1017` | Model id |
+| `LLM_MAX_TOKENS` | `2048` | Completion budget, reasoning tokens included |
+| `LLM_TIMEOUT` | `90` | Seconds to wait for the inference API |
 | `VULTR_INFERENCE_API_KEY` | empty | Inference key, never passed to the sandbox |
 | `SANDBOX` | `docker` if available, else `local` | Sandbox backend |
 | `SANDBOX_RUNTIME` | unset | e.g. `runsc` for gVisor |
 
+## Using real Vultr Serverless Inference
+
+1. Create an inference key in the Vultr console (Serverless Inference).
+2. Put it in a private file such as `.secrets/inference.env` (mode 600, outside git) as `VULTR_INFERENCE_API_KEY=...`.
+3. Run:
+
+```
+set -a; . ../.secrets/inference.env; set +a
+LLM_PROVIDER=openai SANDBOX=docker SANDBOX_RUNTIME=runsc python3 -m blastbox.server
+```
+
+The user running the server needs access to the Docker socket (docker group or root).
+
+Model choice: `deepseek-v4.1-flash-1017`. It is a cheap flash model ($0.15 in and $0.60 out per 1M tokens) that returned a clean Python code block on the first try. `qwen3.8-flash-next` is cheaper but in our test it spent a 300 token budget entirely on reasoning and returned empty content, so it is not the default. BlastBox only needs plain text with one code block, no tool calling. If a model returns no content, BlastBox shows a clear error instead of running nothing.
+
 ## Tests
 
-`python3 -m unittest discover -s tests -t .` runs 44 tests: core and streaming tests on the local sandbox, the same 13 containment tests against Docker with runc and again with gVisor, and deploy file checks. Container tests skip themselves when Docker or runsc is missing.
+`python3 -m unittest discover -s tests -t .` runs 45 tests: core and streaming tests on the local sandbox, the same 13 containment tests against Docker with runc and again with gVisor, deploy file checks, and one opt-in live inference test (`tests/test_live_vultr.py`) that is skipped unless `VULTR_INFERENCE_API_KEY` is set. The live test makes one short chat call. Container tests skip themselves when Docker or runsc is missing.
 
 ## Deploy (single Vultr VM, not yet run)
 
@@ -51,7 +68,8 @@ Environment variables:
 
 ## Honest limitations
 
-- Not yet run against real Vultr inference. Credits are not claimed yet. Only the mock LLM has been exercised.
+- Real Vultr inference has been exercised on the dev box (Nov 4, 2026) with deepseek-v4.1-flash-1017 and gVisor, on a handful of short tasks only.
+- The model sometimes refuses obviously malicious tasks and prints a refusal instead of attempting them, so the containment demo is most reliable with the mock LLM or with less blatant prompts.
 - Containers were tested on the dev box with Docker 27.3.1 (runc) and gVisor release-20251020.0, both with the container network stack set to none. Not yet tested on a Vultr VM.
 - Blocked actions are detected by matching error text in the output (for example "Network unreachable" or "Read-only file system"). Code that swallows its own errors will be contained but may not show a red event.
 - The deploy scripts in `deploy/` are written but have not been run against a real VM.

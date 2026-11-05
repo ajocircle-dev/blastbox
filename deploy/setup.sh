@@ -2,7 +2,7 @@
 # One-shot setup for a fresh Ubuntu 24.04 / Debian 12+ Vultr Cloud Compute VM.
 # Usage (as root, from a checkout of this repo):  DOMAIN=example.com bash deploy/setup.sh
 # DOMAIN is optional. Without it Caddy serves plain HTTP on port 80.
-# Not yet run against a real VM.
+# Tested on a Vultr vc2-1c-2gb Ubuntu 24.04 VM (Chicago), Nov 5 2026.
 set -euo pipefail
 
 APP_DIR=/opt/blastbox
@@ -13,6 +13,8 @@ SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "== packages"
 export DEBIAN_FRONTEND=noninteractive
+# First boot: unattended-upgrades can hold the dpkg lock. Wait for it instead of failing.
+echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99blastbox-lock-wait
 apt-get update -q
 apt-get install -y -q ca-certificates curl gnupg python3 debian-keyring debian-archive-keyring apt-transport-https ufw
 

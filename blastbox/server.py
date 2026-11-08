@@ -20,7 +20,7 @@ es.onmessage=null;['task','code','line','blocked','result','destroyed','error','
 const e=JSON.parse(m.data);if(k=='end'){es.close();return}
 if(k=='task')add('<p>Task: '+esc(e.text)+'</p>');
 if(k=='code')add('<p>Code written by the model:</p><pre>'+esc(e.text)+'</pre><p>Live output:</p><pre id=log></pre>');
-if(k=='line'){document.getElementById('log').textContent+=e.text+'\n'}
+if(k=='line'){document.getElementById('log').textContent+=e.text+'\\n'}
 if(k=='blocked')add('<p class=blocked>BLOCKED: '+esc(e.text)+'</p>');
 if(k=='result')add('<p class=ok>exit '+e.exit_code+' in '+e.seconds+'s ('+esc(e.sandbox)+')</p>');
 if(k=='destroyed')add('<p>'+esc(e.text)+'</p>');
